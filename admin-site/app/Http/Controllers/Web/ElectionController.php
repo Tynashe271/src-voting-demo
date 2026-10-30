@@ -167,6 +167,17 @@ class ElectionController extends Controller
         return back()->with('status', 'Candidate rejected.');
     }
 
+    // Unlike approve/reject, this is allowed even after voting has opened -- see
+    // migrations/006_candidate_disqualification.sql. Already-cast votes for the candidate are
+    // never touched; they're excluded from the sealed tally when the election closes.
+    public function disqualifyCandidate(string $election, string $candidate): RedirectResponse
+    {
+        $this->votingApi->disqualifyCandidate($candidate);
+        $this->auditService->logCandidateManagement('candidate_disqualified', $candidate, []);
+
+        return back()->with('status', 'Candidate disqualified. Any votes already cast for them will not be counted.');
+    }
+
     public function setEligibility(Request $request, string $election): RedirectResponse
     {
         $request->validate([

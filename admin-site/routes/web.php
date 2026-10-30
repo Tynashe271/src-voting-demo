@@ -40,6 +40,7 @@ Route::middleware('auth:admin')->group(function () {
     Route::patch('/elections/{election}/candidates/{candidate}', [ElectionController::class, 'updateCandidate'])->name('candidates.update');
     Route::post('/elections/{election}/candidates/{candidate}/approve', [ElectionController::class, 'approveCandidate'])->name('candidates.approve');
     Route::post('/elections/{election}/candidates/{candidate}/reject', [ElectionController::class, 'rejectCandidate'])->name('candidates.reject');
+    Route::post('/elections/{election}/candidates/{candidate}/disqualify', [ElectionController::class, 'disqualifyCandidate'])->name('candidates.disqualify');
     Route::post('/elections/{election}/eligibility', [ElectionController::class, 'setEligibility'])->name('eligibility.store');
 
     Route::get('/students', [StudentImportController::class, 'index'])->name('students.index');

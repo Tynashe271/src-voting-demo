@@ -118,6 +118,11 @@ func main() {
 	admin.PATCH("/candidates/:id", a.adminUpdateCandidate)
 	admin.PATCH("/candidates/:id/approve", a.adminSetCandidateApproval("APPROVED"))
 	admin.PATCH("/candidates/:id/reject", a.adminSetCandidateApproval("REJECTED"))
+	// Unlike approve/reject, a disqualification is allowed to go through even after the election
+	// has opened (migration 006's trigger carve-out permits only this specific transition while
+	// OPEN); votes already cast for the candidate are never altered or removed, but sealResults
+	// excludes them from the sealed tally.
+	admin.PATCH("/candidates/:id/disqualify", a.adminSetCandidateApproval("DISQUALIFIED"))
 	admin.POST("/elections/:id/eligibility", a.adminSetEligibility)
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok"}) })
 	r.GET("/readyz", func(c *gin.Context) {
@@ -1058,6 +1063,14 @@ func (a *App) advanceElections() error {
 			return fmt.Errorf("election %s schedule violates 06:00-23:59 university-local policy", e.ID)
 		}
 		if e.Status == "UPCOMING" && !now.Before(e.Opens) && now.Before(e.Closes) {
+			// A candidate staff never approved or rejected before voting opened auto-loses rather
+			// than silently appearing or vanishing later: it's moved to REJECTED (not DISQUALIFIED,
+			// which is reserved for staff action against a candidate that was already on the
+			// ballot) so it never appears on the ballot. Runs while the election is still UPCOMING,
+			// before the status flip below, so the normal (not open-election) trigger path applies.
+			if err := a.db.Exec(`UPDATE candidates SET approval_status='REJECTED' WHERE approval_status='PENDING' AND position_id IN (SELECT id FROM positions WHERE election_id=?)`, electionID).Error; err != nil {
+				return err
+			}
 			res := a.db.Exec("UPDATE elections SET status='OPEN' WHERE id=? AND status='UPCOMING'", electionID)
 			if res.Error != nil {
 				return res.Error
@@ -1103,7 +1116,9 @@ func (a *App) sealResults(tx *gorm.DB, election uuid.UUID, now time.Time) error 
 		Position, Candidate     string
 		Votes                   int64
 	}
-	tx.Raw(`SELECT bs.position_id,bs.candidate_id,p.name AS position,c.name AS candidate,count(*) AS votes FROM ballot_selections bs JOIN positions p ON p.id=bs.position_id JOIN candidates c ON c.id=bs.candidate_id WHERE p.election_id=? GROUP BY bs.position_id,bs.candidate_id,p.name,c.name ORDER BY p.name,c.name`, election).Scan(&rows)
+	// A candidate disqualified mid-election keeps every ballot selection cast for them (ballots are
+	// immutable and anonymous), but their votes are excluded from the sealed, public tally here.
+	tx.Raw(`SELECT bs.position_id,bs.candidate_id,p.name AS position,c.name AS candidate,count(*) AS votes FROM ballot_selections bs JOIN positions p ON p.id=bs.position_id JOIN candidates c ON c.id=bs.candidate_id WHERE p.election_id=? AND c.approval_status<>'DISQUALIFIED' GROUP BY bs.position_id,bs.candidate_id,p.name,c.name ORDER BY p.name,c.name`, election).Scan(&rows)
 	data, err := json.Marshal(rows)
 	if err != nil {
 		return err

@@ -112,19 +112,29 @@
                                     'bg-amber-100 text-amber-800' => $candidate['approval_status'] === 'PENDING',
                                     'bg-emerald-100 text-emerald-800' => $candidate['approval_status'] === 'APPROVED',
                                     'bg-red-100 text-red-800' => $candidate['approval_status'] === 'REJECTED',
+                                    'bg-slate-800 text-white' => $candidate['approval_status'] === 'DISQUALIFIED',
                                 ])">{{ $candidate['approval_status'] }}</span>
                         </div>
                         <div class="flex items-center gap-3">
-                            @if ($candidate['approval_status'] !== 'APPROVED')
+                            @if (! in_array($candidate['approval_status'], ['APPROVED', 'DISQUALIFIED']))
                                 <form method="POST" action="{{ route('candidates.approve', [$electionId, $candidate['id']]) }}">
                                     @csrf
                                     <button type="submit" class="text-xs font-medium text-emerald-700 hover:underline">Approve</button>
                                 </form>
                             @endif
-                            @if ($candidate['approval_status'] !== 'REJECTED')
+                            @if (! in_array($candidate['approval_status'], ['REJECTED', 'DISQUALIFIED']))
                                 <form method="POST" action="{{ route('candidates.reject', [$electionId, $candidate['id']]) }}">
                                     @csrf
                                     <button type="submit" class="text-xs font-medium text-red-600 hover:underline">Reject</button>
+                                </form>
+                            @endif
+                            {{-- Disqualify is the only candidate action still allowed once voting has opened
+                                 (migration 006) -- it's offered for an APPROVED candidate at any time, including
+                                 mid-election, so staff can act on a problem discovered after voting has started. --}}
+                            @if ($candidate['approval_status'] === 'APPROVED')
+                                <form method="POST" action="{{ route('candidates.disqualify', [$electionId, $candidate['id']]) }}" onsubmit="return confirm('Disqualify {{ $candidate['name'] }}? Votes already cast for them will not be counted. This cannot be undone.');">
+                                    @csrf
+                                    <button type="submit" class="text-xs font-medium text-slate-800 hover:underline">Disqualify</button>
                                 </form>
                             @endif
                         </div>

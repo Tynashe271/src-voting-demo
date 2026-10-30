@@ -107,6 +107,11 @@ class VotingApiClient
         $this->decode($this->client()->patch("/candidates/{$candidateId}/reject"));
     }
 
+    public function disqualifyCandidate(string $candidateId): void
+    {
+        $this->decode($this->client()->patch("/candidates/{$candidateId}/disqualify"));
+    }
+
     /** @return array<int,array{id:string,name:string,description:?string,display_order:int,max_selections:int}> */
     public function positions(string $electionId): array
     {
