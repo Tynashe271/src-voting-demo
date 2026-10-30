@@ -1,0 +1,23 @@
+# Development-oriented container for the admin-management portal: runs `artisan serve` directly.
+# A real deployment should replace this with PHP-FPM behind Nginx and a process manager, plus the
+# network isolation the specification calls for (university/VPN-only, never the public gateway
+# that serves student-site) — see repo-root SPECIFICATION_STATUS.md.
+FROM node:22-alpine AS assets
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY vite.config.js ./
+COPY resources ./resources
+RUN npm run build
+
+FROM php:8.3-cli-alpine
+RUN docker-php-ext-install pdo pdo_pgsql pgsql
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+WORKDIR /app
+COPY composer.json composer.lock ./
+RUN composer install --no-dev --no-interaction --no-scripts --prefer-dist
+COPY . .
+COPY --from=assets /app/public/build ./public/build
+RUN composer dump-autoload --optimize
+EXPOSE 8000
+CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]

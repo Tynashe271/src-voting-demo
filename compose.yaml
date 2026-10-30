@@ -1,0 +1,71 @@
+services:
+  nginx:
+    image: docker.io/library/nginx:1.27-alpine
+    restart: unless-stopped
+    ports: ["8080:80"]
+    volumes: ["./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro", "./student-site:/usr/share/nginx/html:ro"]
+    depends_on: [api]
+  api:
+    container_name: src-voting-api
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    expose: ["8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+  migrate:
+    build: .
+    profiles: ["tools"]
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/migrate"]
+  admin-site:
+    container_name: src-voting-admin
+    build: ./admin-site
+    env_file: ./admin-site/.env
+    restart: unless-stopped
+    # Deliberately NOT reachable through the `nginx` gateway that serves student-site, and not
+    # published to the host by default here — the specification requires the admin site to be
+    # network-isolated (university/VPN-only), which is an operator/deployment decision, not
+    # something this compose file should default to exposing publicly.
+    expose: ["8000"]
+    environment:
+      VOTING_API_BASE_URL: "http://api:8080/api/v1/admin"
+      VOTING_API_KEY: "${INTERNAL_ADMIN_API_KEY}"
+    depends_on:
+      api:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+  postgres:
+    container_name: src-voting-postgres
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-voting}
+      POSTGRES_USER: ${POSTGRES_USER:-voting}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a local development database password}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    ports: ["5437:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-voting} -d ${POSTGRES_DB:-voting}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  redis:
+    container_name: src-voting-redis
+    image: docker.io/library/redis:7-alpine
+    restart: unless-stopped
+    ports: ["6382:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+volumes:
+  postgres_data:

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#173c32">
+  <meta name="description" content="Secure Student Representative Council election voting portal.">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/styles.css">
+  <title>SRC Student Voting</title>
+  <!-- Override for deployments where this site and the API/admin portal are not on the same
+       gateway origin. Both default to same-origin-relative paths that work with the bundled
+       nginx setup. -->
+  <script>window.SRC_API='http://localhost:8080/api/v1';window.SRC_ADMIN_URL='http://localhost:8000';</script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+  <header class="topbar"><a class="brand" href="#home" aria-label="SRC Voting home"><span class="brand-mark">SRC</span><span>Student Voting</span></a><button id="signout" class="button button-quiet hidden">Sign out</button></header>
+  <main id="main" class="shell"><div id="notice" class="notice hidden" role="status" aria-live="polite"></div><div id="view" aria-live="polite"></div></main>
+  <footer><span>Student Representative Council elections</span><span>Need help? Contact your university election office.</span></footer>
+  <script src="/app.js" defer></script>
+</body>
+</html>
