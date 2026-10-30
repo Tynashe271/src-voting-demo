@@ -286,13 +286,29 @@ func (a *App) login(c *gin.Context) {
 	setAuthCookies(c, token, csrf)
 	c.JSON(200, gin.H{"success": true, "csrf_token": csrf})
 }
+// cookieSameSite defaults to Strict, matching the specification's same-origin-gateway deployment
+// (student-site and the API served through one nginx host). It's only relaxed via COOKIE_SAMESITE
+// when the two are deliberately split across different origins/sites (e.g. separate hosted
+// services without a shared reverse-proxy origin), in which case browsers never send a Strict or
+// even Lax cookie on the cross-site fetches the student-site makes, and every post-login request
+// comes back 401. None requires COOKIE_SECURE=true, which is already required for it to apply.
+func cookieSameSite() http.SameSite {
+	switch strings.ToLower(os.Getenv("COOKIE_SAMESITE")) {
+	case "none":
+		return http.SameSiteNoneMode
+	case "lax":
+		return http.SameSiteLaxMode
+	default:
+		return http.SameSiteStrictMode
+	}
+}
 func setAuthCookies(c *gin.Context, sessionToken, csrfToken string) {
-	c.SetSameSite(http.SameSiteStrictMode)
+	c.SetSameSite(cookieSameSite())
 	c.SetCookie("src_session", sessionToken, 8*3600, "/", "", os.Getenv("COOKIE_SECURE") == "true", true)
 	c.SetCookie("src_csrf", csrfToken, 8*3600, "/", "", os.Getenv("COOKIE_SECURE") == "true", false)
 }
 func clearAuthCookies(c *gin.Context) {
-	c.SetSameSite(http.SameSiteStrictMode)
+	c.SetSameSite(cookieSameSite())
 	c.SetCookie("src_session", "", -1, "/", "", os.Getenv("COOKIE_SECURE") == "true", true)
 	c.SetCookie("src_csrf", "", -1, "/", "", os.Getenv("COOKIE_SECURE") == "true", false)
 }

@@ -14,6 +14,14 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Render (like Heroku/Fly) terminates TLS at its edge and forwards plain HTTP internally,
+        // setting X-Forwarded-Proto/Host/For. Without trusting that header, $request->isSecure()
+        // is always false behind the proxy, so url()/redirect() generate http:// links even on an
+        // https:// site -- which breaks the post-login redirect (and any Secure-cookie-dependent
+        // follow-up request following that http:// hop). The proxy is the only hop in front of
+        // this container, so trusting all proxies for these headers is appropriate here.
+        $middleware->trustProxies(at: '*');
+
         $middleware->append([
             \App\Http\Middleware\SecurityHeadersMiddleware::class,
         ]);
