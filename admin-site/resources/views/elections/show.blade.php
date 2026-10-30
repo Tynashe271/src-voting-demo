@@ -45,19 +45,50 @@
 
         @if ($results)
             <div class="border-t border-slate-100 pt-4">
-                <p class="mb-2 text-sm font-medium">Sealed results <span class="text-xs font-normal text-slate-500">(visible until {{ $results['visible_until'] }})</span></p>
-                <ul class="space-y-1 text-sm">
-                    @foreach (collect($results['totals'])->groupBy('Position') as $positionName => $rows)
-                        <li>
-                            <span class="font-medium">{{ $positionName }}:</span>
-                            {{ $rows->map(fn ($r) => "{$r['Candidate']} ({$r['Votes']})")->implode(', ') }}
-                        </li>
-                    @endforeach
-                </ul>
+                <div class="mb-3 flex items-center justify-between">
+                    <p class="text-sm font-medium">
+                        Sealed results
+                        @if ($results['published'])
+                            <span class="ml-2 inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">Published {{ \Illuminate\Support\Carbon::parse($results['published_at'])->format('d M Y, H:i') }}</span>
+                        @else
+                            <span class="ml-2 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Staff-only preview &mdash; not published to students</span>
+                        @endif
+                    </p>
+                    @if (! $results['published'])
+                        <form method="POST" action="{{ route('results.publish', $electionId) }}"
+                              onsubmit="return confirm('Publish results to all students? This cannot be undone or edited afterwards.');">
+                            @csrf
+                            <button type="submit" class="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800">Publish results</button>
+                        </form>
+                    @endif
+                </div>
+                {{-- Simple per-position bar chart: bar width is this candidate's share of that
+                     position's total votes, so results read at a glance without a JS charting lib. --}}
+                @foreach (collect($results['totals'])->groupBy('Position') as $positionName => $rows)
+                    @php
+                        $positionTotal = $rows->sum('Votes');
+                        $maxVotes = $rows->max('Votes') ?: 1;
+                    @endphp
+                    <div class="mb-4">
+                        <p class="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ $positionName }} &mdash; {{ $positionTotal }} vote{{ $positionTotal === 1 ? '' : 's' }}</p>
+                        <div class="space-y-1.5">
+                            @foreach ($rows->sortByDesc('Votes') as $row)
+                                @php $pct = $positionTotal > 0 ? round($row['Votes'] * 100 / $positionTotal, 1) : 0; @endphp
+                                <div class="flex items-center gap-2 text-sm">
+                                    <span class="w-32 shrink-0 truncate" title="{{ $row['Candidate'] }}">{{ $row['Candidate'] }}</span>
+                                    <div class="h-4 flex-1 overflow-hidden rounded bg-slate-100">
+                                        <div class="h-full rounded bg-slate-700" style="width: {{ $maxVotes > 0 ? round($row['Votes'] * 100 / $maxVotes, 1) : 0 }}%"></div>
+                                    </div>
+                                    <span class="w-20 shrink-0 text-right text-slate-600">{{ $row['Votes'] }} ({{ $pct }}%)</span>
+                                </div>
+                            @endforeach
+                        </div>
+                    </div>
+                @endforeach
                 <p class="mt-2 break-all text-xs text-slate-400">Integrity hash: {{ $results['integrity_hash'] }}</p>
             </div>
         @else
-            <p class="border-t border-slate-100 pt-4 text-sm text-slate-600">Results are not sealed/visible yet.</p>
+            <p class="border-t border-slate-100 pt-4 text-sm text-slate-600">Results are not sealed yet &mdash; the election must close first.</p>
         @endif
     </div>
 </div>
@@ -105,7 +136,13 @@
             <div class="space-y-2">
                 @forelse ($candidatesByPosition->get($position['id'], []) as $candidate)
                     <div class="flex items-center justify-between rounded-md border border-slate-100 px-3 py-2">
-                        <div>
+                        <div class="flex items-center gap-3">
+                            @if (! empty($candidate['photo_url']))
+                                <img src="{{ $candidate['photo_url'] }}" alt="" class="h-10 w-10 shrink-0 rounded-full object-cover">
+                            @else
+                                <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-200 text-sm font-semibold text-slate-500">{{ strtoupper(substr($candidate['name'], 0, 1)) }}</span>
+                            @endif
+                            <div>
                             <span class="text-sm font-medium">{{ $candidate['name'] }}</span>
                             <span class="ml-2 inline-flex rounded-full px-2 py-0.5 text-xs font-medium
                                 @class([
@@ -114,6 +151,7 @@
                                     'bg-red-100 text-red-800' => $candidate['approval_status'] === 'REJECTED',
                                     'bg-slate-800 text-white' => $candidate['approval_status'] === 'DISQUALIFIED',
                                 ])">{{ $candidate['approval_status'] }}</span>
+                            </div>
                         </div>
                         <div class="flex items-center gap-3">
                             @if (! in_array($candidate['approval_status'], ['APPROVED', 'DISQUALIFIED']))
@@ -144,10 +182,14 @@
                 @endforelse
             </div>
 
-            <form method="POST" action="{{ route('candidates.store', [$electionId, $position['id']]) }}" class="mt-4 grid grid-cols-1 gap-2 border-t border-slate-100 pt-4 sm:grid-cols-4">
+            <form method="POST" action="{{ route('candidates.store', [$electionId, $position['id']]) }}" enctype="multipart/form-data" class="mt-4 grid grid-cols-1 gap-2 border-t border-slate-100 pt-4 sm:grid-cols-4">
                 @csrf
                 <input name="name" placeholder="Candidate name" required maxlength="200" class="rounded-md border-slate-300 text-sm sm:col-span-2">
-                <input name="photo_url" placeholder="Photo URL (optional)" class="rounded-md border-slate-300 text-sm">
+                <div class="sm:col-span-2">
+                    <label class="block text-xs font-medium text-slate-600">Picture (so students recognise the candidate)</label>
+                    <input name="photo" type="file" accept="image/*" class="mt-1 block w-full text-xs">
+                </div>
+                <input name="photo_url" placeholder="...or paste a photo URL instead" class="rounded-md border-slate-300 text-sm sm:col-span-2">
                 <button type="submit" class="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium hover:bg-slate-50">Add candidate</button>
                 <textarea name="biography" placeholder="Biography (optional)" rows="2" class="rounded-md border-slate-300 text-sm sm:col-span-2"></textarea>
                 <textarea name="manifesto" placeholder="Manifesto (optional)" rows="2" class="rounded-md border-slate-300 text-sm sm:col-span-2"></textarea>

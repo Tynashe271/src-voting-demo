@@ -145,6 +145,34 @@ class VotingApiClient
         return $this->decode($this->client()->get("/elections/{$electionId}/results"));
     }
 
+    /**
+     * Sealed totals for staff review, visible as soon as the election closes -- before students
+     * can see anything, and before results are published. Null (not an exception) when the
+     * election hasn't closed/sealed yet, so the results page can render a normal "not ready" state.
+     *
+     * @return array{status:string,totals:array,integrity_hash:string,generated_at:string,published:bool,published_at:?string}|null
+     */
+    public function adminResults(string $electionId): ?array
+    {
+        $response = $this->client()->get("/elections/{$electionId}/results");
+        if ($response->status() === 404) {
+            return null;
+        }
+
+        return $this->decode($response);
+    }
+
+    /**
+     * The one-time, irreversible act of revealing already-sealed results to students. Throws
+     * VotingApiException (409) if the election isn't sealed yet, or if already published.
+     *
+     * @return array{published:bool,visible_until:string}
+     */
+    public function publishResults(string $electionId): array
+    {
+        return $this->decode($this->client()->post("/elections/{$electionId}/results/publish"));
+    }
+
     /** @return array{opens_at:string,closes_at:string,results_visible_from:?string,results_visible_until:?string,status:string} */
     public function timing(string $electionId): array
     {

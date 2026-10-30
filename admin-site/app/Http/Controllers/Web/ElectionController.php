@@ -8,6 +8,7 @@ use App\Services\AuditService;
 use App\Services\VotingApiClient;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
 
 /**
@@ -58,7 +59,7 @@ class ElectionController extends Controller
         $candidates = collect($this->votingApi->candidates($election))->groupBy('position_id');
 
         $turnout = $this->tryFetch(fn () => $this->votingApi->turnout($election));
-        $results = $this->tryFetch(fn () => $this->votingApi->results($election));
+        $results = $this->votingApi->adminResults($election);
 
         return view('elections.show', [
             'election' => $current,
@@ -125,12 +126,15 @@ class ElectionController extends Controller
     {
         $request->validate([
             'name' => 'required|string|max:200',
+            'photo' => 'nullable|image|max:4096',
             'photo_url' => 'nullable|string',
             'biography' => 'nullable|string',
             'manifesto' => 'nullable|string',
         ]);
 
-        $candidate = $this->votingApi->createCandidate($position, $request->string('name'), $request->input('photo_url'), $request->input('biography'), $request->input('manifesto'));
+        $photoUrl = $this->storeCandidatePhoto($request) ?? $request->input('photo_url');
+
+        $candidate = $this->votingApi->createCandidate($position, $request->string('name'), $photoUrl, $request->input('biography'), $request->input('manifesto'));
         $this->auditService->logCandidateManagement('candidate_created', $candidate['id'], ['position_id' => $position]);
 
         return back()->with('status', 'Candidate added — pending approval.');
@@ -140,15 +144,36 @@ class ElectionController extends Controller
     {
         $request->validate([
             'name' => 'required|string|max:200',
+            'photo' => 'nullable|image|max:4096',
             'photo_url' => 'nullable|string',
             'biography' => 'nullable|string',
             'manifesto' => 'nullable|string',
         ]);
 
-        $this->votingApi->updateCandidate($candidate, $request->string('name'), $request->input('photo_url'), $request->input('biography'), $request->input('manifesto'));
+        $photoUrl = $this->storeCandidatePhoto($request) ?? $request->input('photo_url');
+
+        $this->votingApi->updateCandidate($candidate, $request->string('name'), $photoUrl, $request->input('biography'), $request->input('manifesto'));
         $this->auditService->logCandidateManagement('candidate_updated', $candidate, []);
 
         return back()->with('status', 'Candidate updated.');
+    }
+
+    // Students need to actually recognise who they're voting for, so a real picture upload beats
+    // asking staff to paste a URL. Stored on the 'public' disk locally; set FILESYSTEM_DISK to an
+    // S3-compatible disk (e.g. Neon Object Storage) in a real deployment so photos survive a
+    // redeploy of this ephemeral container -- see admin-site/README.md.
+    protected function storeCandidatePhoto(Request $request): ?string
+    {
+        if (! $request->hasFile('photo')) {
+            return null;
+        }
+
+        $path = $request->file('photo')->store('candidate-photos', 'public');
+
+        // The 'public' disk's own url() already returns an absolute URL (config/filesystems.php
+        // builds it from APP_URL + /storage) -- prepending APP_URL again here produced a doubled,
+        // broken URL like "http://host.comhttp://host.com/storage/...".
+        return Storage::disk('public')->url($path);
     }
 
     public function approveCandidate(string $election, string $candidate): RedirectResponse
@@ -176,6 +201,18 @@ class ElectionController extends Controller
         $this->auditService->logCandidateManagement('candidate_disqualified', $candidate, []);
 
         return back()->with('status', 'Candidate disqualified. Any votes already cast for them will not be counted.');
+    }
+
+    // The one-time, irreversible act of revealing already-sealed results to students. The Go
+    // backend enforces that this can only happen once (409 on a repeat call) and only after the
+    // election has actually closed and sealed -- this is a thin pass-through, not where the
+    // integrity guarantee lives.
+    public function publishResults(string $election): RedirectResponse
+    {
+        $this->votingApi->publishResults($election);
+        $this->auditService->logElectionConfiguration('results_published', $election, []);
+
+        return back()->with('status', 'Results published. Students can now see them.');
     }
 
     public function setEligibility(Request $request, string $election): RedirectResponse

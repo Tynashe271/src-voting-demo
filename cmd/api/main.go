@@ -103,6 +103,7 @@ func main() {
 	admin := v.Group("/admin", a.internalAdmin)
 	admin.GET("/elections/:id/turnout", a.turnout)
 	admin.GET("/elections/:id/results", a.adminResults)
+	admin.POST("/elections/:id/results/publish", a.adminPublishResults)
 	admin.GET("/elections/:id/timing", a.adminTiming)
 	admin.GET("/audit", a.audit)
 	admin.GET("/elections", a.adminListElections)
@@ -468,14 +469,16 @@ func (a *App) positions(c *gin.Context) {
 	a.db.Raw("SELECT id,name,description,display_order,max_selections FROM positions WHERE election_id=? ORDER BY display_order", c.Param("id")).Scan(&r)
 	jsonRows(c, r)
 }
+// candidates (and positionCandidates below) order within each position randomly, re-rolled on
+// every read, so no candidate gets a structural first-on-the-list advantage across the electorate.
 func (a *App) candidates(c *gin.Context) {
 	var r []map[string]any
-	a.db.Raw("SELECT c.id,c.position_id,c.name,c.photo_url,c.biography,c.manifesto FROM candidates c JOIN positions p ON p.id=c.position_id WHERE p.election_id=? AND c.approval_status='APPROVED' ORDER BY p.display_order,c.name", c.Param("id")).Scan(&r)
+	a.db.Raw("SELECT c.id,c.position_id,c.name,c.photo_url,c.biography,c.manifesto FROM candidates c JOIN positions p ON p.id=c.position_id WHERE p.election_id=? AND c.approval_status='APPROVED' ORDER BY p.display_order,random()", c.Param("id")).Scan(&r)
 	jsonRows(c, r)
 }
 func (a *App) positionCandidates(c *gin.Context) {
 	var r []map[string]any
-	a.db.Raw("SELECT c.id,c.position_id,c.name,c.photo_url,c.biography,c.manifesto FROM candidates c JOIN positions p ON p.id=c.position_id WHERE p.id=? AND c.approval_status='APPROVED'", c.Param("id")).Scan(&r)
+	a.db.Raw("SELECT c.id,c.position_id,c.name,c.photo_url,c.biography,c.manifesto FROM candidates c JOIN positions p ON p.id=c.position_id WHERE p.id=? AND c.approval_status='APPROVED' ORDER BY random()", c.Param("id")).Scan(&r)
 	jsonRows(c, r)
 }
 func (a *App) candidate(c *gin.Context) {
@@ -654,13 +657,16 @@ func pct(a, b int64) float64 {
 	}
 	return float64(a) * 100 / float64(b)
 }
+// results is the student-facing read: sealed totals only become visible once staff have published
+// them (a separate, equally immutable, insert-only result_publications row) -- being SEALED alone
+// is not enough. See migrations/007_result_publication.sql.
 func (a *App) results(c *gin.Context) {
 	var r struct {
 		Totals       json.RawMessage
 		Hash         string
 		VisibleUntil time.Time
 	}
-	if err := a.db.Raw("SELECT totals,result_hash AS hash,visible_until FROM result_batches WHERE election_id=? AND status='SEALED' AND visible_from<=now() AND visible_until>now()", c.Param("id")).Scan(&r).Error; err != nil {
+	if err := a.db.Raw(`SELECT rb.totals,rb.result_hash AS hash,rp.visible_until FROM result_batches rb JOIN result_publications rp ON rp.election_id=rb.election_id WHERE rb.election_id=? AND rb.status='SEALED' AND rp.visible_until>now()`, c.Param("id")).Scan(&r).Error; err != nil {
 		fail(c, 503, "Results are temporarily unavailable.")
 		return
 	}
@@ -670,22 +676,59 @@ func (a *App) results(c *gin.Context) {
 	}
 	c.JSON(200, gin.H{"status": "SEALED", "totals": json.RawMessage(r.Totals), "integrity_hash": r.Hash, "visible_until": r.VisibleUntil})
 }
+
+// adminResults lets staff review the sealed totals and charts as soon as the election closes --
+// before publishing, not gated by whether a result_publications row exists yet -- so there's a
+// real review step rather than results reaching students the instant voting closes.
 func (a *App) adminResults(c *gin.Context) {
 	var r struct {
-		Totals       json.RawMessage
-		Hash         string
-		GeneratedAt  time.Time
-		VisibleUntil time.Time
+		Totals      json.RawMessage
+		Hash        string
+		GeneratedAt time.Time
+		Published   bool
+		PublishedAt *time.Time
 	}
-	if err := a.db.Raw("SELECT totals,result_hash AS hash,generated_at,visible_until FROM result_batches WHERE election_id=? AND status='SEALED' AND visible_from<=now() AND visible_until>now()", c.Param("id")).Scan(&r).Error; err != nil {
+	if err := a.db.Raw(`SELECT rb.totals,rb.result_hash AS hash,rb.generated_at,(rp.election_id IS NOT NULL) AS published,rp.published_at FROM result_batches rb LEFT JOIN result_publications rp ON rp.election_id=rb.election_id WHERE rb.election_id=? AND rb.status='SEALED'`, c.Param("id")).Scan(&r).Error; err != nil {
 		fail(c, 503, "Results are temporarily unavailable.")
 		return
 	}
 	if len(r.Totals) == 0 {
-		fail(c, 404, "Results are not available.")
+		fail(c, 404, "Results are not available. The election may not have closed yet.")
 		return
 	}
-	c.JSON(200, gin.H{"status": "SEALED", "totals": json.RawMessage(r.Totals), "integrity_hash": r.Hash, "generated_at": r.GeneratedAt, "visible_until": r.VisibleUntil})
+	c.JSON(200, gin.H{"status": "SEALED", "totals": json.RawMessage(r.Totals), "integrity_hash": r.Hash, "generated_at": r.GeneratedAt, "published": r.Published, "published_at": r.PublishedAt})
+}
+
+// adminPublishResults is the one-time, irreversible act of revealing already-sealed results to
+// students. A second insert-only row rather than an update to result_batches (which cannot be
+// updated at all once inserted) -- publishing is itself tamper-evident, not just the tally.
+func (a *App) adminPublishResults(c *gin.Context) {
+	eID := c.Param("id")
+	var sealed bool
+	if err := a.db.Raw("SELECT EXISTS(SELECT 1 FROM result_batches WHERE election_id=? AND status='SEALED')", eID).Scan(&sealed).Error; err != nil || !sealed {
+		fail(c, 409, "Results cannot be published yet. The election must be closed and sealed first.")
+		return
+	}
+	until := time.Now().UTC().Add(24 * time.Hour)
+	res := a.db.Exec("INSERT INTO result_publications(election_id,visible_until) VALUES (?,?) ON CONFLICT (election_id) DO NOTHING", eID, until)
+	if res.Error != nil {
+		fail(c, 500, "Results could not be published.")
+		return
+	}
+	if res.RowsAffected == 0 {
+		fail(c, 409, "Results have already been published and are locked.")
+		return
+	}
+	a.db.Exec("UPDATE elections SET status='RESULTS_VISIBLE' WHERE id=? AND status='CLOSED'", eID)
+	if err := a.broadcastElectionNotification(a.db, uuid.MustParse(eID), "RESULTS_AVAILABLE", "The SRC election has closed. Official sealed results are now available for the next 24 hours."); err != nil {
+		fail(c, 500, "Results were published but notifications could not be sent.")
+		return
+	}
+	if err := a.appendAudit(a.db, "internal-admin-api", "RESULT_PUBLISHED", "election:"+eID, ""); err != nil {
+		fail(c, 500, "Results were published but the audit log entry failed.")
+		return
+	}
+	c.JSON(200, gin.H{"published": true, "visible_until": until})
 }
 func (a *App) adminTiming(c *gin.Context) {
 	var r map[string]any
@@ -1023,7 +1066,7 @@ func (a *App) dashboard(c *gin.Context) {
 	var notes []map[string]any
 	a.db.Raw("SELECT id,type,message,read_at,created_at FROM notifications WHERE student_id=? ORDER BY created_at DESC LIMIT 10", student).Scan(&notes)
 	var resultsAvailable bool
-	a.db.Raw(`SELECT EXISTS(SELECT 1 FROM result_batches WHERE election_id=(SELECT id FROM `+relevantElection+`) AND status='SEALED' AND visible_from<=now() AND visible_until>now())`).Scan(&resultsAvailable)
+	a.db.Raw(`SELECT EXISTS(SELECT 1 FROM result_batches rb JOIN result_publications rp ON rp.election_id=rb.election_id WHERE rb.election_id=(SELECT id FROM `+relevantElection+`) AND rb.status='SEALED' AND rp.visible_until>now())`).Scan(&resultsAvailable)
 	if notes == nil {
 		notes = []map[string]any{}
 	}
@@ -1125,12 +1168,15 @@ func (a *App) sealResults(tx *gorm.DB, election uuid.UUID, now time.Time) error 
 	}
 	sum := sha256.Sum256(data)
 	until := now.UTC().Add(24 * time.Hour)
+	// visible_from/visible_until are no longer what gates student visibility (see
+	// migrations/007_result_publication.sql) -- kept here only as a record of when sealing
+	// happened, not acted on by any read path.
 	if err := tx.Exec("INSERT INTO result_batches(election_id,totals,result_hash,status,visible_from,visible_until) VALUES (?,?,?,?,?,?)", election, string(data), hex.EncodeToString(sum[:]), "SEALED", now.UTC(), until).Error; err != nil {
 		return err
 	}
-	if err := a.broadcastElectionNotification(tx, election, "RESULTS_AVAILABLE", "The SRC election has closed. Official sealed results are now available for the next 24 hours."); err != nil {
-		return err
-	}
+	// Sealing freezes the tamper-proof tally the instant voting closes; it does not reveal
+	// anything to students. That only happens when staff explicitly publish (adminPublishResults),
+	// so no student notification fires here.
 	return a.appendAudit(tx, "election-engine", "RESULT_SEALED", "election:"+election.String(), "")
 }
 
