@@ -29,7 +29,12 @@ return new class extends Migration
 
         Schema::create('sessions', function (Blueprint $table) {
             $table->string('id')->primary();
-            $table->foreignId('user_id')->nullable()->index();
+            // Not foreignId(): the admin guard's AdminAccount primary key is a uuid
+            // (admin_accounts.id on the separate `voting` connection), not an auto-increment
+            // bigint, so this column has to be able to hold one. SQLite's loose column typing
+            // silently accepted a uuid string here; Postgres correctly rejects it as invalid
+            // bigint input -- this only surfaced once the default connection moved off sqlite.
+            $table->uuid('user_id')->nullable()->index();
             $table->string('ip_address', 45)->nullable();
             $table->text('user_agent')->nullable();
             $table->longText('payload');
