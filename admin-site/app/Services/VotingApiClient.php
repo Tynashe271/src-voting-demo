@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Exceptions\VotingApiException;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
@@ -20,7 +21,16 @@ class VotingApiClient
     {
         return Http::baseUrl(rtrim(config('services.voting_api.base_url'), '/'))
             ->withHeaders(['X-Internal-Admin-Key' => config('services.voting_api.key')])
-            ->acceptJson();
+            ->acceptJson()
+            ->timeout(20)
+            // The Go backend runs on a free-tier host that spins down when idle; the first
+            // request after a gap gets a 502 from the platform's proxy while it boots back up
+            // (seen live: ~10s cold start). Retry transient/gateway failures with backoff instead
+            // of surfacing that boot window to staff as "the voting backend rejected the request."
+            ->retry(5, 2000, function (\Exception $exception) {
+                return $exception instanceof ConnectionException
+                    || in_array($exception->response?->status(), [502, 503, 504], true);
+            }, throw: false);
     }
 
     protected function decode(Response $response): array
