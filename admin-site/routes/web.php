@@ -20,9 +20,16 @@ use Illuminate\Support\Facades\Route;
 
 Route::middleware('guest:admin')->group(function () {
     Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
-    Route::post('/login', [AuthController::class, 'login']);
     Route::get('/login/mfa', [AuthController::class, 'showMfa'])->name('login.mfa');
-    Route::post('/login/mfa', [AuthController::class, 'verifyMfa']);
+
+    // Brute-force protection for the two credential-checking steps (password, then OTP). Keyed by
+    // IP via Laravel's default throttle signature — matches the spirit of the Go API's own
+    // 10-attempts/15-minutes login limiter (cmd/api/main.go), which this admin login previously had
+    // no equivalent of at all.
+    Route::middleware('throttle:10,15')->group(function () {
+        Route::post('/login', [AuthController::class, 'login']);
+        Route::post('/login/mfa', [AuthController::class, 'verifyMfa']);
+    });
 });
 
 Route::middleware('auth:admin')->group(function () {

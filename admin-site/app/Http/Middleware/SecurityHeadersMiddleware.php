@@ -26,7 +26,9 @@ class SecurityHeadersMiddleware
 
         // Content Security Policy
         $csp = "default-src 'self'; " .
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " .
+                // Every form confirmation lives in resources/js/app.js (a data-confirm attribute +
+                // a delegated listener) specifically so no inline/eval'd script is ever needed here.
+                "script-src 'self'; " .
                 "style-src 'self' 'unsafe-inline'; " .
                 "img-src 'self' data: https:; " .
                 "font-src 'self' data:; " .

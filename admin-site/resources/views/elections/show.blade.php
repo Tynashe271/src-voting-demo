@@ -56,7 +56,7 @@
                     </p>
                     @if (! $results['published'])
                         <form method="POST" action="{{ route('results.publish', $electionId) }}"
-                              onsubmit="return confirm('Publish results to all students? This cannot be undone or edited afterwards.');">
+                              data-confirm="Publish results to all students? This cannot be undone or edited afterwards.">
                             @csrf
                             <button type="submit" class="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800">Publish results</button>
                         </form>
@@ -127,7 +127,7 @@
                     <input name="max_selections" type="number" min="1" value="{{ $position['max_selections'] }}" required class="rounded-md border-slate-300 text-sm" title="Max selections">
                     <button type="submit" class="col-span-2 rounded-md border border-slate-300 px-3 py-1 text-xs font-medium hover:bg-slate-50 sm:col-span-4">Save position</button>
                 </form>
-                <form method="POST" action="{{ route('positions.destroy', [$electionId, $position['id']]) }}" onsubmit="return confirm('Remove this position?');">
+                <form method="POST" action="{{ route('positions.destroy', [$electionId, $position['id']]) }}" data-confirm="Remove this position?">
                     @csrf @method('DELETE')
                     <button type="submit" class="text-xs text-red-600 hover:underline">Remove</button>
                 </form>
@@ -170,7 +170,7 @@
                                  (migration 006) -- it's offered for an APPROVED candidate at any time, including
                                  mid-election, so staff can act on a problem discovered after voting has started. --}}
                             @if ($candidate['approval_status'] === 'APPROVED')
-                                <form method="POST" action="{{ route('candidates.disqualify', [$electionId, $candidate['id']]) }}" onsubmit="return confirm('Disqualify {{ $candidate['name'] }}? Votes already cast for them will not be counted. This cannot be undone.');">
+                                <form method="POST" action="{{ route('candidates.disqualify', [$electionId, $candidate['id']]) }}" data-confirm="Disqualify {{ $candidate['name'] }}? Votes already cast for them will not be counted. This cannot be undone.">
                                     @csrf
                                     <button type="submit" class="text-xs font-medium text-slate-800 hover:underline">Disqualify</button>
                                 </form>
