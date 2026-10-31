@@ -8,9 +8,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PublishedWithChanges
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -116,15 +118,72 @@ fun AdminElectionDetailScreen(electionId: String, state: AdminUiState, viewModel
         Text("Positions & candidates", style = MaterialTheme.typography.titleLarge, color = AdminSlate900, modifier = Modifier.padding(top = 12.dp, bottom = 8.dp))
         state.positions.forEach { position ->
             AdminCard {
-                Text(position.name, style = MaterialTheme.typography.titleMedium, color = AdminSlate900)
+                var editingPosition by remember { mutableStateOf(false) }
+                var positionName by remember { mutableStateOf(position.name) }
+                var positionDescription by remember { mutableStateOf(position.description ?: "") }
+                var positionOrder by remember { mutableStateOf(position.display_order.toString()) }
+                var positionMaxSelections by remember { mutableStateOf(position.max_selections.toString()) }
+
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(position.name, style = MaterialTheme.typography.titleMedium, color = AdminSlate900, modifier = Modifier.weight(1f))
+                    IconButton(onClick = {
+                        positionName = position.name
+                        positionDescription = position.description ?: ""
+                        positionOrder = position.display_order.toString()
+                        positionMaxSelections = position.max_selections.toString()
+                        editingPosition = !editingPosition
+                    }) {
+                        Icon(Icons.Filled.Edit, contentDescription = "Edit position", tint = AdminSlate700)
+                    }
+                }
+                if (editingPosition) {
+                    OutlinedTextField(positionName, { positionName = it }, label = { Text("Position name") }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                    OutlinedTextField(positionDescription, { positionDescription = it }, label = { Text("Description (optional)") }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                    OutlinedTextField(positionOrder, { positionOrder = it }, label = { Text("Display order") }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                    OutlinedTextField(positionMaxSelections, { positionMaxSelections = it }, label = { Text("Max selections") }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                    AdminPrimaryButton("Save changes") {
+                        viewModel.updatePosition(
+                            electionId, position.id, positionName, positionDescription,
+                            positionOrder.toIntOrNull() ?: position.display_order,
+                            positionMaxSelections.toIntOrNull() ?: position.max_selections,
+                        )
+                        editingPosition = false
+                    }
+                }
+
                 val people = state.candidates.filter { it.position_id == position.id }
                 if (people.isEmpty()) Text("No candidates yet.", modifier = Modifier.padding(top = 6.dp))
                 people.forEach { c ->
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    var editingCandidate by remember { mutableStateOf(false) }
+                    var candidateEditName by remember { mutableStateOf(c.name) }
+                    var candidateEditPhotoUrl by remember { mutableStateOf(c.photo_url ?: "") }
+                    var candidateEditBiography by remember { mutableStateOf(c.biography ?: "") }
+                    var candidateEditManifesto by remember { mutableStateOf(c.manifesto ?: "") }
+
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         CandidateAvatar(c.name, c.photo_url)
                         Text(c.name, modifier = Modifier.weight(1f).padding(start = 10.dp))
                         ApprovalChip(c.approval_status)
+                        IconButton(onClick = {
+                            candidateEditName = c.name
+                            candidateEditPhotoUrl = c.photo_url ?: ""
+                            candidateEditBiography = c.biography ?: ""
+                            candidateEditManifesto = c.manifesto ?: ""
+                            editingCandidate = !editingCandidate
+                        }) {
+                            Icon(Icons.Filled.Edit, contentDescription = "Edit candidate", tint = AdminSlate700)
+                        }
+                    }
+                    if (editingCandidate) {
+                        OutlinedTextField(candidateEditName, { candidateEditName = it }, label = { Text("Candidate name") }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                        OutlinedTextField(candidateEditPhotoUrl, { candidateEditPhotoUrl = it }, label = { Text("Photo URL (optional)") }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                        OutlinedTextField(candidateEditBiography, { candidateEditBiography = it }, label = { Text("Biography (optional)") }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                        OutlinedTextField(candidateEditManifesto, { candidateEditManifesto = it }, label = { Text("Manifesto (optional)") }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                        AdminPrimaryButton("Save changes") {
+                            viewModel.updateCandidate(electionId, c.id, candidateEditName, candidateEditPhotoUrl, candidateEditBiography, candidateEditManifesto)
+                            editingCandidate = false
+                        }
                     }
                     Row(Modifier.padding(top = 4.dp)) {
                         if (c.approval_status !in listOf("APPROVED", "DISQUALIFIED")) {

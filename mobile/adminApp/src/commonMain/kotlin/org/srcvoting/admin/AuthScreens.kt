@@ -99,3 +99,43 @@ fun AdminMfaSetupScreen(state: AdminUiState, viewModel: AdminViewModel) {
         }
     }
 }
+
+@Composable
+fun AdminAccountScreen(state: AdminUiState, viewModel: AdminViewModel) {
+    var password by remember { mutableStateOf("") }
+    val account = state.account
+
+    AdminScaffold(
+        title = "Account & security",
+        subtitle = account?.email ?: "",
+        state = state,
+        viewModel = viewModel,
+    ) {
+        AdminCard {
+            Text("Multi-factor authentication", style = MaterialTheme.typography.titleMedium, color = AdminSlate900)
+            Text(
+                if (account?.mfa_enabled == true) "Enabled" else "Disabled",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
+            )
+            if (account?.mfa_enabled == true) {
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Current password") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "Disabling MFA weakens this account's protection. The account cannot stay without it for long — you'll be asked to re-enroll on next sign-in if you don't do it here.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                AdminSecondaryButton("Disable MFA") { viewModel.disableMfa(password) }
+                AdminPrimaryButton("Re-enroll (new QR code)") { viewModel.reenrollMfa() }
+            } else {
+                AdminPrimaryButton("Set up MFA") { viewModel.reenrollMfa() }
+            }
+        }
+    }
+}

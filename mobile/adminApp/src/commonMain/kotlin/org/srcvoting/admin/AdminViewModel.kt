@@ -29,6 +29,7 @@ sealed interface AdminScreen {
     data class ElectionDetail(val electionId: String) : AdminScreen
     data object Students : AdminScreen
     data object Audit : AdminScreen
+    data object Account : AdminScreen
 }
 
 data class AdminUiState(
@@ -67,6 +68,7 @@ class AdminViewModel(private val api: AdminApiClient = AdminApiClient()) : ViewM
             is AdminScreen.Elections -> loadElections()
             is AdminScreen.ElectionDetail -> loadElectionDetail(screen.electionId)
             is AdminScreen.Audit -> loadAudit()
+            is AdminScreen.Account -> loadAccount()
             else -> Unit
         }
     }
@@ -167,6 +169,19 @@ class AdminViewModel(private val api: AdminApiClient = AdminApiClient()) : ViewM
         }
     }
 
+    fun updateElection(electionId: String, name: String, electionDate: String) {
+        clearMessages()
+        _state.update { it.copy(loading = true) }
+        viewModelScope.launch {
+            try {
+                api.updateElection(electionId, name, electionDate)
+                loadElections()
+            } catch (e: ApiException) {
+                setError(e.message ?: "Election could not be updated.")
+            }
+        }
+    }
+
     private fun loadElectionDetail(electionId: String) {
         _state.update { it.copy(loading = true) }
         viewModelScope.launch {
@@ -204,6 +219,18 @@ class AdminViewModel(private val api: AdminApiClient = AdminApiClient()) : ViewM
         }
     }
 
+    fun updatePosition(electionId: String, positionId: String, name: String, description: String, order: Int, maxSelections: Int) {
+        clearMessages()
+        viewModelScope.launch {
+            try {
+                api.updatePosition(positionId, CreatePositionRequest(name, description, order, maxSelections))
+                loadElectionDetail(electionId)
+            } catch (e: ApiException) {
+                setError(e.message ?: "Position could not be updated.")
+            }
+        }
+    }
+
     fun createCandidate(
         electionId: String,
         positionId: String,
@@ -221,6 +248,27 @@ class AdminViewModel(private val api: AdminApiClient = AdminApiClient()) : ViewM
                 loadElectionDetail(electionId)
             } catch (e: ApiException) {
                 setError(e.message ?: "Candidate could not be created. The election may already be open.")
+            }
+        }
+    }
+
+    fun updateCandidate(
+        electionId: String,
+        candidateId: String,
+        name: String,
+        photoUrl: String,
+        biography: String,
+        manifesto: String,
+        photoBytes: ByteArray? = null,
+        photoFileName: String? = null,
+    ) {
+        clearMessages()
+        viewModelScope.launch {
+            try {
+                api.updateCandidate(candidateId, name, photoUrl, biography, manifesto, photoBytes, photoFileName)
+                loadElectionDetail(electionId)
+            } catch (e: ApiException) {
+                setError(e.message ?: "Candidate could not be updated.")
             }
         }
     }
@@ -290,4 +338,33 @@ class AdminViewModel(private val api: AdminApiClient = AdminApiClient()) : ViewM
             }
         }
     }
+
+    private fun loadAccount() {
+        _state.update { it.copy(loading = true) }
+        viewModelScope.launch {
+            try {
+                val account = api.me()
+                _state.update { it.copy(loading = false, account = account) }
+            } catch (e: ApiException) {
+                setError(e.message ?: "Account details could not be loaded.")
+            }
+        }
+    }
+
+    /** Re-enrollment (a fresh QR code) after this completes is the same [beginMfaSetup] flow login uses. */
+    fun disableMfa(password: String) {
+        clearMessages()
+        _state.update { it.copy(loading = true) }
+        viewModelScope.launch {
+            try {
+                api.disableMfa(password)
+                _state.update { it.copy(info = "MFA disabled.") }
+                loadAccount()
+            } catch (e: ApiException) {
+                setError(e.message ?: "MFA could not be disabled.")
+            }
+        }
+    }
+
+    fun reenrollMfa() = beginMfaSetup()
 }

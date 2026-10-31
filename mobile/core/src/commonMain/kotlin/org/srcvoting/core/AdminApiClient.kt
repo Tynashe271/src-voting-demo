@@ -136,6 +136,13 @@ class AdminApiClient(
         })
     }
 
+    suspend fun updatePosition(positionId: String, req: CreatePositionRequest) {
+        decodeUnit(client.patch("$baseUrl/admin/positions/$positionId") {
+            contentType(ContentType.Application.Json)
+            setBody(req)
+        })
+    }
+
     suspend fun deletePosition(positionId: String) {
         decodeUnit(client.delete("$baseUrl/admin/positions/$positionId"))
     }
@@ -164,6 +171,37 @@ class AdminApiClient(
             }
         } else {
             client.post("$baseUrl/admin/positions/$positionId/candidates") {
+                contentType(ContentType.Application.Json)
+                setBody(CreateCandidateRequest(name, photoUrl.orEmpty(), biography.orEmpty(), manifesto.orEmpty()))
+            }
+        }
+        decodeUnit(response)
+    }
+
+    /** [photoBytes]/[photoFileName] are optional; pass them to replace the photo with a real upload instead of [photoUrl]. */
+    suspend fun updateCandidate(
+        candidateId: String,
+        name: String,
+        photoUrl: String? = null,
+        biography: String? = null,
+        manifesto: String? = null,
+        photoBytes: ByteArray? = null,
+        photoFileName: String? = null,
+    ) {
+        val response = if (photoBytes != null && photoFileName != null) {
+            client.patch("$baseUrl/admin/candidates/$candidateId") {
+                setBody(MultiPartFormDataContent(formData {
+                    append("name", name)
+                    append("photo_url", photoUrl.orEmpty())
+                    append("biography", biography.orEmpty())
+                    append("manifesto", manifesto.orEmpty())
+                    append("photo", photoBytes, Headers.build {
+                        append(HttpHeaders.ContentDisposition, "filename=\"$photoFileName\"")
+                    })
+                }))
+            }
+        } else {
+            client.patch("$baseUrl/admin/candidates/$candidateId") {
                 contentType(ContentType.Application.Json)
                 setBody(CreateCandidateRequest(name, photoUrl.orEmpty(), biography.orEmpty(), manifesto.orEmpty()))
             }

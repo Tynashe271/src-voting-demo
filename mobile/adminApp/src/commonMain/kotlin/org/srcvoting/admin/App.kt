@@ -47,6 +47,7 @@ fun AdminApp() {
                     is AdminScreen.ElectionDetail -> AdminElectionDetailScreen(screen.electionId, state, viewModel)
                     AdminScreen.Students -> AdminStudentsScreen(state, viewModel)
                     AdminScreen.Audit -> AdminAuditScreen(state, viewModel)
+                    AdminScreen.Account -> AdminAccountScreen(state, viewModel)
                 }
                 if (state.loading) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

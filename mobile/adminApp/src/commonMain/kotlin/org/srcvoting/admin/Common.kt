@@ -14,6 +14,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.HowToVote
 import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.ManageAccounts
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -43,7 +44,7 @@ fun AdminScaffold(
     showNav: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    val canGoBack = showNav && state.screen is AdminScreen.ElectionDetail
+    val canGoBack = showNav && (state.screen is AdminScreen.ElectionDetail || state.screen is AdminScreen.Account)
 
     Scaffold(
         topBar = {
@@ -58,6 +59,9 @@ fun AdminScaffold(
                 },
                 actions = {
                     if (showNav) {
+                        IconButton(onClick = { viewModel.navigate(AdminScreen.Account) }) {
+                            Icon(Icons.Filled.ManageAccounts, contentDescription = "Account & security")
+                        }
                         IconButton(onClick = { viewModel.signOut() }) {
                             Icon(Icons.Filled.Logout, contentDescription = "Sign out")
                         }
