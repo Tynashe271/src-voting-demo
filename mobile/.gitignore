@@ -1,0 +1,22 @@
+# Gradle
+.gradle/
+build/
+*/build/
+
+# Android
+local.properties
+*.apk
+*.aab
+.cxx/
+
+# Kotlin/Native, Xcode (iOS build artifacts if a Mac user builds here)
+*.xcworkspace
+xcuserdata/
+DerivedData/
+*.ipa
+*.app
+
+# IDE
+.idea/
+*.iml
+.kotlin/
