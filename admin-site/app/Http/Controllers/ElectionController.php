@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Concerns\StoresCandidatePhoto;
 use App\Services\AuditService;
 use App\Services\VotingApiClient;
 use Illuminate\Http\JsonResponse;
@@ -11,14 +12,33 @@ use Illuminate\Http\Request;
  * Admin-configuration surface only. Every write here is a thin call into the Go voting backend's
  * internal admin API via VotingApiClient — this controller must never touch a local election/
  * position/candidate model or table, since none exist in this app any more; Go's Postgres schema
- * is the single source of truth. All routes sit behind the `auth:admin` guard (see routes/api.php).
+ * is the single source of truth. All routes sit behind the `auth:admin` + RequireAdminMfa guard
+ * (see routes/api.php).
  */
 class ElectionController extends Controller
 {
+    use StoresCandidatePhoto;
+
     public function __construct(
         protected VotingApiClient $votingApi,
         protected AuditService $auditService,
     ) {
+    }
+
+    public function index(): JsonResponse
+    {
+        return response()->json(['success' => true, 'data' => $this->votingApi->listElections()]);
+    }
+
+    public function positions(string $election): JsonResponse
+    {
+        return response()->json(['success' => true, 'data' => $this->votingApi->positions($election)]);
+    }
+
+    /** Every candidate regardless of approval status, so a native client can offer the same PENDING-review workflow as the Blade UI. */
+    public function candidates(string $election): JsonResponse
+    {
+        return response()->json(['success' => true, 'data' => $this->votingApi->candidates($election)]);
     }
 
     public function importStudents(Request $request): JsonResponse
@@ -127,12 +147,15 @@ class ElectionController extends Controller
     {
         $request->validate([
             'name' => 'required|string|max:200',
+            'photo' => 'nullable|image|max:4096',
             'photo_url' => 'nullable|string',
             'biography' => 'nullable|string',
             'manifesto' => 'nullable|string',
         ]);
 
-        $candidate = $this->votingApi->createCandidate($position, $request->string('name'), $request->input('photo_url'), $request->input('biography'), $request->input('manifesto'));
+        $photoUrl = $this->storeCandidatePhoto($request) ?? $request->input('photo_url');
+
+        $candidate = $this->votingApi->createCandidate($position, $request->string('name'), $photoUrl, $request->input('biography'), $request->input('manifesto'));
 
         $this->auditService->logCandidateManagement('candidate_created', $candidate['id'], [
             'position_id' => $position,
@@ -146,12 +169,15 @@ class ElectionController extends Controller
     {
         $request->validate([
             'name' => 'required|string|max:200',
+            'photo' => 'nullable|image|max:4096',
             'photo_url' => 'nullable|string',
             'biography' => 'nullable|string',
             'manifesto' => 'nullable|string',
         ]);
 
-        $this->votingApi->updateCandidate($candidate, $request->string('name'), $request->input('photo_url'), $request->input('biography'), $request->input('manifesto'));
+        $photoUrl = $this->storeCandidatePhoto($request) ?? $request->input('photo_url');
+
+        $this->votingApi->updateCandidate($candidate, $request->string('name'), $photoUrl, $request->input('biography'), $request->input('manifesto'));
 
         $this->auditService->logCandidateManagement('candidate_updated', $candidate, $request->only(['name', 'photo_url', 'biography', 'manifesto']));
 
@@ -174,6 +200,30 @@ class ElectionController extends Controller
         $this->auditService->logCandidateManagement('candidate_rejected', $candidate, []);
 
         return response()->json(['success' => true, 'message' => 'Candidate rejected successfully.']);
+    }
+
+    // Unlike approve/reject, allowed even after voting has opened (migration 006's trigger
+    // carve-out) -- staff can act on a problem discovered mid-election; already-cast votes for the
+    // candidate are excluded from the sealed tally but never altered.
+    public function disqualifyCandidate(string $candidate): JsonResponse
+    {
+        $this->votingApi->disqualifyCandidate($candidate);
+
+        $this->auditService->logCandidateManagement('candidate_disqualified', $candidate, []);
+
+        return response()->json(['success' => true, 'message' => 'Candidate disqualified. Any votes already cast for them will not be counted.']);
+    }
+
+    // The one-time, irreversible act of revealing already-sealed results to students. The Go
+    // backend enforces that this can only happen once (409 on a repeat call) and only once the
+    // election has actually closed and sealed.
+    public function publishResults(string $election): JsonResponse
+    {
+        $result = $this->votingApi->publishResults($election);
+
+        $this->auditService->logElectionConfiguration('results_published', $election, []);
+
+        return response()->json(['success' => true, 'message' => 'Results published. Students can now see them.', 'data' => $result]);
     }
 
     public function setEligibility(Request $request, string $election): JsonResponse

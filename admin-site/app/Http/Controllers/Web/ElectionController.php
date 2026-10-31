@@ -3,12 +3,12 @@
 namespace App\Http\Controllers\Web;
 
 use App\Exceptions\VotingApiException;
+use App\Http\Controllers\Concerns\StoresCandidatePhoto;
 use App\Http\Controllers\Controller;
 use App\Services\AuditService;
 use App\Services\VotingApiClient;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
 
 /**
@@ -18,6 +18,8 @@ use Illuminate\View\View;
  */
 class ElectionController extends Controller
 {
+    use StoresCandidatePhoto;
+
     public function __construct(
         protected VotingApiClient $votingApi,
         protected AuditService $auditService,
@@ -156,30 +158,6 @@ class ElectionController extends Controller
         $this->auditService->logCandidateManagement('candidate_updated', $candidate, []);
 
         return back()->with('status', 'Candidate updated.');
-    }
-
-    // Students need to actually recognise who they're voting for, so a real picture upload beats
-    // asking staff to paste a URL. Uses the app's default disk (FILESYSTEM_DISK) rather than a
-    // hardcoded one: locally that's 'public' (this container's own ephemeral disk, fine for dev),
-    // in production it's 's3' pointed at Neon Object Storage (see config/filesystems.php and the
-    // s3/ candidate-photos bucket), so uploaded photos survive this container being redeployed.
-    protected function storeCandidatePhoto(Request $request): ?string
-    {
-        if (! $request->hasFile('photo')) {
-            return null;
-        }
-
-        // No subfolder prefix: locally the 'public' disk is used for nothing but candidate photos,
-        // and in production the whole bucket (candidate-photos, see config/filesystems.php) is
-        // already dedicated to them -- prefixing with the same name a second time here produced a
-        // doubled path, https://.../candidate-photos/candidate-photos/<file>.png, that 404'd.
-        $disk = config('filesystems.default');
-        $path = $request->file('photo')->store('', $disk);
-
-        // The disk's own url() already returns an absolute URL (built from APP_URL for 'public', or
-        // AWS_URL for 's3') -- prepending APP_URL again here produced a doubled, broken URL like
-        // "http://host.comhttp://host.com/storage/...".
-        return Storage::disk($disk)->url($path);
     }
 
     public function approveCandidate(string $election, string $candidate): RedirectResponse
