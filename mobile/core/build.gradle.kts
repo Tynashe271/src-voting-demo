@@ -35,6 +35,8 @@ kotlin {
                 api(libs.ktor.client.logging)
                 api(libs.kotlinx.serialization.json)
                 api(libs.kotlinx.coroutines.core)
+                api(libs.coil.compose)
+                api(libs.coil.network.ktor)
             }
         }
         val androidMain by getting {

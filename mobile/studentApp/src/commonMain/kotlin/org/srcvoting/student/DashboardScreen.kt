@@ -4,12 +4,37 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.material3.AssistChip
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.HourglassEmpty
+import androidx.compose.material.icons.filled.School
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+
+@Composable
+private fun StatCard(icon: androidx.compose.ui.graphics.vector.ImageVector, value: String, label: String, modifier: Modifier = Modifier) {
+    Card(
+        modifier.padding(end = 10.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = SrcPaper),
+        border = androidx.compose.foundation.BorderStroke(0.dp, SrcPaper),
+    ) {
+        androidx.compose.foundation.layout.Column(Modifier.padding(14.dp)) {
+            Icon(icon, contentDescription = null, tint = SrcGold, modifier = Modifier.padding(bottom = 6.dp))
+            Text(value, style = MaterialTheme.typography.titleMedium, color = SrcGreen)
+            Text(label, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
 
 @Composable
 fun DashboardScreen(state: StudentUiState, viewModel: StudentViewModel) {
@@ -22,28 +47,28 @@ fun DashboardScreen(state: StudentUiState, viewModel: StudentViewModel) {
         state = state,
         viewModel = viewModel,
     ) {
-        InfoCard {
-            Text(profile?.registration_number ?: "", style = MaterialTheme.typography.titleMedium)
-            Text("Registration number", style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.height(10.dp))
-            Text(profile?.programme ?: "Student", style = MaterialTheme.typography.titleMedium)
-            Text("Programme", style = MaterialTheme.typography.bodySmall)
+        Row(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+            StatCard(Icons.Filled.Badge, profile?.registration_number ?: "", "Registration number", Modifier.weight(1f))
+            StatCard(Icons.Filled.School, profile?.programme ?: "Student", "Programme", Modifier.weight(1f))
         }
 
         if (election == null) {
             InfoCard { Text("No election is scheduled at this time.") }
         } else {
             InfoCard {
-                Row(Modifier.fillMaxWidth()) {
-                    Text("Current election", style = MaterialTheme.typography.labelMedium)
-                }
-                Text(election.name, style = MaterialTheme.typography.titleLarge)
-                AssistChip(onClick = {}, label = { Text(election.status ?: "") })
+                Text("CURRENT ELECTION", style = MaterialTheme.typography.labelMedium, color = SrcGold)
+                Text(election.name, style = MaterialTheme.typography.titleLarge.copy(fontFamily = SrcSerif))
                 Spacer(Modifier.height(6.dp))
-                Text(if (election.has_voted) "Submitted" else "Not yet voted", style = MaterialTheme.typography.titleMedium)
-                Text("Your voting status", style = MaterialTheme.typography.bodySmall)
-                Spacer(Modifier.height(8.dp))
-                Text("Voting closes ${election.closes_at ?: ""}")
+                StatusPill(election.status ?: "")
+                Spacer(Modifier.height(10.dp))
+                Row {
+                    Icon(if (election.has_voted) Icons.Filled.CheckCircle else Icons.Filled.HourglassEmpty, contentDescription = null, tint = if (election.has_voted) SrcGreen else SrcGold)
+                    androidx.compose.foundation.layout.Column(Modifier.padding(start = 8.dp)) {
+                        Text(if (election.has_voted) "Submitted" else "Not yet voted", style = MaterialTheme.typography.titleMedium)
+                        Text("Your voting status", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                Text("Voting closes ${election.closes_at ?: ""}", modifier = Modifier.padding(top = 10.dp))
 
                 if (election.status == "OPEN" && !election.has_voted) {
                     PrimaryButton("Vote now") { viewModel.navigate(Screen.Ballot(election.id)) }
@@ -58,7 +83,7 @@ fun DashboardScreen(state: StudentUiState, viewModel: StudentViewModel) {
         }
 
         InfoCard {
-            Text("Before you vote", style = MaterialTheme.typography.titleMedium)
+            Text("Before you vote", style = MaterialTheme.typography.titleMedium, color = SrcGreen)
             Text("Review candidates, choose once for each position, check your selections, then confirm submission. A submitted ballot cannot be changed.")
             if (election != null) {
                 SecondaryButton("Browse candidates") { viewModel.navigate(Screen.Candidates(election.id)) }

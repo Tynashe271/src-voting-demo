@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -14,9 +14,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 
-private val AdminColorScheme = darkColorScheme(
-    primary = Color(0xFF0F172A),
-    secondary = Color(0xFF334155),
+// Matches the Blade admin UI's Tailwind slate theme exactly -- staff who use both surfaces should
+// recognise this as the same product.
+val AdminSlate900 = Color(0xFF0F172A)
+val AdminSlate700 = Color(0xFF334155)
+val AdminSlate100 = Color(0xFFF1F5F9)
+val AdminEmerald = Color(0xFF047857)
+val AdminAmber = Color(0xFFB45309)
+val AdminRed = Color(0xFFB91C1C)
+
+private val AdminColorScheme = lightColorScheme(
+    primary = AdminSlate900,
+    onPrimary = Color.White,
+    secondary = AdminSlate700,
+    background = Color.White,
+    surface = Color.White,
 )
 
 @Composable
@@ -38,7 +50,7 @@ fun AdminApp() {
                 }
                 if (state.loading) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                        CircularProgressIndicator(color = AdminSlate900)
                     }
                 }
             }

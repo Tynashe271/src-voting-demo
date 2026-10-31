@@ -2,6 +2,10 @@ package org.srcvoting.admin
 
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -27,6 +31,7 @@ fun AdminLoginScreen(state: AdminUiState, viewModel: AdminViewModel) {
         showNav = false,
     ) {
         AdminCard {
+            Icon(Icons.Filled.AdminPanelSettings, contentDescription = null, tint = AdminSlate900, modifier = Modifier.padding(bottom = 10.dp))
             OutlinedTextField(
                 value = email,
                 onValueChange = { email = it },
@@ -57,6 +62,7 @@ fun AdminMfaCodeScreen(email: String, password: String, state: AdminUiState, vie
         showNav = false,
     ) {
         AdminCard {
+            Icon(Icons.Filled.Shield, contentDescription = null, tint = AdminSlate900, modifier = Modifier.padding(bottom = 10.dp))
             OutlinedTextField(
                 value = otp,
                 onValueChange = { otp = it },
