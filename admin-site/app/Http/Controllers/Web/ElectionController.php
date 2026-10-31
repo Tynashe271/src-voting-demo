@@ -169,8 +169,12 @@ class ElectionController extends Controller
             return null;
         }
 
+        // No subfolder prefix: locally the 'public' disk is used for nothing but candidate photos,
+        // and in production the whole bucket (candidate-photos, see config/filesystems.php) is
+        // already dedicated to them -- prefixing with the same name a second time here produced a
+        // doubled path, https://.../candidate-photos/candidate-photos/<file>.png, that 404'd.
         $disk = config('filesystems.default');
-        $path = $request->file('photo')->store('candidate-photos', $disk);
+        $path = $request->file('photo')->store('', $disk);
 
         // The disk's own url() already returns an absolute URL (built from APP_URL for 'public', or
         // AWS_URL for 's3') -- prepending APP_URL again here produced a doubled, broken URL like
