@@ -50,7 +50,11 @@ trait PreparesVotingConnection
             'id' => (string) Str::uuid(),
             'email' => 'staff@example.com',
             'password_hash' => Hash::make('correct-horse-battery-staple'),
-            'mfa_enabled' => false,
+            // Default true: RequireAdminMfa now blocks everything but /account/security for an
+            // un-enrolled admin, so a test exercising ordinary admin actions needs an already-
+            // enrolled account. Pass ['mfa_enabled' => false] explicitly for a test that's actually
+            // about the not-yet-enrolled state (e.g. the security page's own setup prompt).
+            'mfa_enabled' => true,
             'account_status' => 'ACTIVE',
             'staff_identifier' => 'staff-001',
         ], $attributes));

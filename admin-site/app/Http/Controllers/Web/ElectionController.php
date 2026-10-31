@@ -159,21 +159,23 @@ class ElectionController extends Controller
     }
 
     // Students need to actually recognise who they're voting for, so a real picture upload beats
-    // asking staff to paste a URL. Stored on the 'public' disk locally; set FILESYSTEM_DISK to an
-    // S3-compatible disk (e.g. Neon Object Storage) in a real deployment so photos survive a
-    // redeploy of this ephemeral container -- see admin-site/README.md.
+    // asking staff to paste a URL. Uses the app's default disk (FILESYSTEM_DISK) rather than a
+    // hardcoded one: locally that's 'public' (this container's own ephemeral disk, fine for dev),
+    // in production it's 's3' pointed at Neon Object Storage (see config/filesystems.php and the
+    // s3/ candidate-photos bucket), so uploaded photos survive this container being redeployed.
     protected function storeCandidatePhoto(Request $request): ?string
     {
         if (! $request->hasFile('photo')) {
             return null;
         }
 
-        $path = $request->file('photo')->store('candidate-photos', 'public');
+        $disk = config('filesystems.default');
+        $path = $request->file('photo')->store('candidate-photos', $disk);
 
-        // The 'public' disk's own url() already returns an absolute URL (config/filesystems.php
-        // builds it from APP_URL + /storage) -- prepending APP_URL again here produced a doubled,
-        // broken URL like "http://host.comhttp://host.com/storage/...".
-        return Storage::disk('public')->url($path);
+        // The disk's own url() already returns an absolute URL (built from APP_URL for 'public', or
+        // AWS_URL for 's3') -- prepending APP_URL again here produced a doubled, broken URL like
+        // "http://host.comhttp://host.com/storage/...".
+        return Storage::disk($disk)->url($path);
     }
 
     public function approveCandidate(string $election, string $candidate): RedirectResponse

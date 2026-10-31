@@ -5,6 +5,7 @@ use App\Http\Controllers\Web\AuthController;
 use App\Http\Controllers\Web\ElectionController;
 use App\Http\Controllers\Web\SecurityController;
 use App\Http\Controllers\Web\StudentImportController;
+use App\Http\Middleware\RequireAdminMfa;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -32,7 +33,10 @@ Route::middleware('guest:admin')->group(function () {
     });
 });
 
-Route::middleware('auth:admin')->group(function () {
+// MFA is optional at the database/model level (admin_accounts.mfa_enabled) so an enrolled admin can
+// still turn it off deliberately, but nothing past login is reachable until an account has gone
+// through setup at least once -- see RequireAdminMfa.
+Route::middleware(['auth:admin', RequireAdminMfa::class])->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 
     Route::get('/', [ElectionController::class, 'index'])->name('dashboard');

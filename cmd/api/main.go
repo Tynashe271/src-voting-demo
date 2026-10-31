@@ -42,7 +42,10 @@ type selection struct {
 type ballotRequest struct {
 	Selections []selection `json:"selections" binding:"required,min=1,max=30"`
 }
-type principal struct{ StudentID uuid.UUID }
+type principal struct {
+	StudentID          uuid.UUID
+	MustChangePassword bool
+}
 
 var redisRateScript = redis.NewScript(`
 local n = redis.call('INCR', KEYS[1])
@@ -81,10 +84,14 @@ func main() {
 	v.POST("/auth/refresh", a.auth, a.csrf, a.refresh)
 	v.POST("/auth/logout", a.auth, a.csrf, a.logout)
 	v.GET("/auth/me", a.auth, a.me)
+	// The import-time credential (national_id) is not secret in the way a self-chosen password is,
+	// so a student must set their own password before anything else is reachable. change-password is
+	// deliberately exempt from requirePasswordSet -- it's the only way out of this state.
+	v.POST("/auth/change-password", a.auth, a.csrf, a.changePassword)
 	v.GET("/students/me", a.auth, a.me)
-	v.GET("/students/me/eligibility", a.auth, a.myEligibility)
-	v.GET("/students/me/voting-status", a.auth, a.myVotingStatus)
-	v.GET("/dashboard", a.auth, a.dashboard)
+	v.GET("/students/me/eligibility", a.auth, a.requirePasswordSet, a.myEligibility)
+	v.GET("/students/me/voting-status", a.auth, a.requirePasswordSet, a.myVotingStatus)
+	v.GET("/dashboard", a.auth, a.requirePasswordSet, a.dashboard)
 	v.GET("/elections/current", a.currentElection)
 	v.GET("/elections/:id", a.election)
 	v.GET("/elections/:id/status", a.status)
@@ -92,14 +99,14 @@ func main() {
 	v.GET("/elections/:id/candidates", a.candidates)
 	v.GET("/positions/:id/candidates", a.positionCandidates)
 	v.GET("/candidates/:id", a.candidate)
-	v.GET("/elections/:id/eligibility", a.auth, a.eligibility)
-	v.GET("/elections/:id/ballot", a.auth, a.ballot)
-	v.POST("/elections/:id/ballots", a.auth, a.csrf, a.submitBallot)
-	v.GET("/elections/:id/receipt", a.auth, a.receipt)
+	v.GET("/elections/:id/eligibility", a.auth, a.requirePasswordSet, a.eligibility)
+	v.GET("/elections/:id/ballot", a.auth, a.requirePasswordSet, a.ballot)
+	v.POST("/elections/:id/ballots", a.auth, a.requirePasswordSet, a.csrf, a.submitBallot)
+	v.GET("/elections/:id/receipt", a.auth, a.requirePasswordSet, a.receipt)
 	v.GET("/elections/:id/turnout", a.turnout)
 	v.GET("/elections/:id/results", a.results)
-	v.GET("/notifications", a.auth, a.notifications)
-	v.PATCH("/notifications/:id/read", a.auth, a.csrf, a.readNotification)
+	v.GET("/notifications", a.auth, a.requirePasswordSet, a.notifications)
+	v.PATCH("/notifications/:id/read", a.auth, a.requirePasswordSet, a.csrf, a.readNotification)
 	admin := v.Group("/admin", a.internalAdmin)
 	admin.GET("/elections/:id/turnout", a.turnout)
 	admin.GET("/elections/:id/results", a.adminResults)
@@ -254,15 +261,16 @@ func (a *App) login(c *gin.Context) {
 	// per-byte uint8 conversions), so every uuid column in this file is scanned as string and
 	// parsed with uuid.Parse instead of scanned directly into a uuid.UUID field.
 	var row struct {
-		ID           string
-		PasswordHash string
-		Verified     bool
+		ID                 string
+		PasswordHash       string
+		Verified           bool
+		MustChangePassword bool
 	}
 	if n, err := redisRateScript.Run(c, a.redis, []string{"login-attempt:" + hash(q.RegistrationNumber)}, (15 * time.Minute).Milliseconds()).Int64(); err != nil || n > 10 {
 		fail(c, 429, "Too many sign-in attempts. Try again later.")
 		return
 	}
-	if err := a.db.Raw(`SELECT s.id,a.password_hash, a.email_verified AS verified FROM students s JOIN student_accounts a ON a.student_id=s.id WHERE s.registration_number=? AND s.registration_status='REGISTERED' AND s.account_status='ACTIVE'`, q.RegistrationNumber).Scan(&row).Error; err != nil {
+	if err := a.db.Raw(`SELECT s.id,a.password_hash,a.email_verified AS verified,a.must_change_password FROM students s JOIN student_accounts a ON a.student_id=s.id WHERE s.registration_number=? AND s.registration_status='REGISTERED' AND s.account_status='ACTIVE'`, q.RegistrationNumber).Scan(&row).Error; err != nil {
 		fail(c, 503, "Sign-in is temporarily unavailable.")
 		return
 	}
@@ -290,7 +298,7 @@ func (a *App) login(c *gin.Context) {
 		return
 	}
 	setAuthCookies(c, token, csrf)
-	c.JSON(200, gin.H{"success": true, "csrf_token": csrf})
+	c.JSON(200, gin.H{"success": true, "csrf_token": csrf, "must_change_password": row.MustChangePassword})
 }
 // cookieSameSite defaults to Strict, matching the specification's same-origin-gateway deployment
 // (student-site and the API served through one nginx host). It's only relaxed via COOKIE_SAMESITE
@@ -332,8 +340,11 @@ func (a *App) auth(c *gin.Context) {
 		c.Abort()
 		return
 	}
-	var row struct{ StudentID string }
-	if err := a.db.Raw("SELECT s.student_id FROM sessions s JOIN students u ON u.id=s.student_id JOIN student_accounts a ON a.student_id=s.student_id WHERE s.token_hash=? AND s.revoked_at IS NULL AND s.expires_at>now() AND u.registration_status='REGISTERED' AND u.account_status='ACTIVE' AND a.email_verified=true", hash(t)).Scan(&row).Error; err != nil {
+	var row struct {
+		StudentID          string
+		MustChangePassword bool
+	}
+	if err := a.db.Raw("SELECT s.student_id,a.must_change_password FROM sessions s JOIN students u ON u.id=s.student_id JOIN student_accounts a ON a.student_id=s.student_id WHERE s.token_hash=? AND s.revoked_at IS NULL AND s.expires_at>now() AND u.registration_status='REGISTERED' AND u.account_status='ACTIVE' AND a.email_verified=true", hash(t)).Scan(&row).Error; err != nil {
 		fail(c, 503, "Authentication is temporarily unavailable.")
 		c.Abort()
 		return
@@ -344,7 +355,19 @@ func (a *App) auth(c *gin.Context) {
 		c.Abort()
 		return
 	}
-	c.Set("principal", principal{studentID})
+	c.Set("principal", principal{studentID, row.MustChangePassword})
+	c.Next()
+}
+
+// requirePasswordSet gates every route except auth/me, auth/change-password, auth/refresh and
+// auth/logout: the import-time credential (national_id) is not secret in the way a self-chosen
+// password is, so nothing else is reachable until the student has set their own.
+func (a *App) requirePasswordSet(c *gin.Context) {
+	if p(c).MustChangePassword {
+		fail(c, 403, "You must set a new password before continuing.")
+		c.Abort()
+		return
+	}
 	c.Next()
 }
 
@@ -401,7 +424,47 @@ func (a *App) refresh(c *gin.Context) {
 func (a *App) me(c *gin.Context) {
 	var r map[string]any
 	a.db.Raw("SELECT registration_number,first_name,last_name,university_email,faculty,programme,level FROM students WHERE id=?", p(c).StudentID).Scan(&r)
+	if r == nil {
+		r = map[string]any{}
+	}
+	r["must_change_password"] = p(c).MustChangePassword
 	c.JSON(200, r)
+}
+
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password" binding:"required,max=128"`
+	NewPassword     string `json:"new_password" binding:"required,min=8,max=128"`
+}
+
+// changePassword is reachable even while MustChangePassword is true -- it's the only route that is,
+// since it's the only way out of that state. The import-time credential (national_id) stays valid
+// until this succeeds, so a student can always get back in to retry if the first attempt fails.
+func (a *App) changePassword(c *gin.Context) {
+	var q changePasswordRequest
+	if c.ShouldBindJSON(&q) != nil {
+		fail(c, 400, "Invalid request.")
+		return
+	}
+	if q.NewPassword == q.CurrentPassword {
+		fail(c, 400, "Choose a password different from your current one.")
+		return
+	}
+	student := p(c).StudentID
+	var row struct{ PasswordHash string }
+	if err := a.db.Raw("SELECT password_hash FROM student_accounts WHERE student_id=?", student).Scan(&row).Error; err != nil || row.PasswordHash == "" {
+		fail(c, 503, "Password change is temporarily unavailable.")
+		return
+	}
+	if !verifyPassword(q.CurrentPassword, row.PasswordHash) {
+		fail(c, 401, "Current password is incorrect.")
+		return
+	}
+	if err := a.db.Exec("UPDATE student_accounts SET password_hash=?,must_change_password=false WHERE student_id=?", passwordHash(q.NewPassword), student).Error; err != nil {
+		fail(c, 500, "Password could not be updated.")
+		return
+	}
+	a.recordSecurityEvent(c, "PASSWORD_CHANGED", hash(student.String()), gin.H{"route": c.FullPath()})
+	c.Status(204)
 }
 func (a *App) myEligibility(c *gin.Context) {
 	var r []map[string]any
@@ -983,8 +1046,11 @@ func (a *App) adminImportStudents(c *gin.Context) {
 				s.RegistrationNumber, s.FirstName, s.LastName, email, s.Faculty, s.Programme, s.Level).Scan(&student).Error; err != nil {
 				return err
 			}
-			return tx.Exec(`INSERT INTO student_accounts(student_id,password_hash,email_verified,email_verified_at) VALUES (?,?,true,now())
-				ON CONFLICT (student_id) DO UPDATE SET password_hash=EXCLUDED.password_hash,email_verified=true,email_verified_at=now()`,
+			// must_change_password is reset to true on every (re-)import, including a correction of an
+			// existing student: whatever the national_id is at that moment becomes the credential
+			// again, and it's no more secret the second time than the first.
+			return tx.Exec(`INSERT INTO student_accounts(student_id,password_hash,email_verified,email_verified_at,must_change_password) VALUES (?,?,true,now(),true)
+				ON CONFLICT (student_id) DO UPDATE SET password_hash=EXCLUDED.password_hash,email_verified=true,email_verified_at=now(),must_change_password=true`,
 				student.ID, passwordHash(s.NationalID)).Error
 		})
 		if err != nil {
