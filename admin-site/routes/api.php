@@ -35,7 +35,10 @@ Route::middleware([
     \Illuminate\Session\Middleware\StartSession::class,
 ])->group(function () {
     Route::prefix('admin/auth')->group(function () {
-        Route::post('/login', [AdminAuthController::class, 'login']);
+        // Unlike the Blade login (routes/web.php), this single request carries both the password
+        // check and, when MFA is already enabled, the OTP check -- so without a limiter here, this
+        // was a strictly weaker, unthrottled brute-force target for both secrets at once.
+        Route::middleware('throttle:10,15')->post('/login', [AdminAuthController::class, 'login']);
 
         // RequireAdminMfa exempts this whole prefix (see the middleware's own doc comment)
         // precisely so an un-enrolled admin can still reach login/me/logout/setup/enable/
